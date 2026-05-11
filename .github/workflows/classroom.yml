@@ -1,0 +1,1065 @@
+# GitHub Classroom autograding workflow.
+# Le bloc autograding (steps Classroom + reporter) est régénéré par
+# update-autograding.sh en fonction des sous-paquets d'exercices
+# détectés. Ne pas éditer à la main le bloc entre marqueurs.
+name: GitHub Classroom Workflow
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  build:
+    name: Autograding
+    if: github.repository != 'IUTInfoAix-R203/template-tp-java'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'zulu'
+          cache: maven
+
+      #@@@AUTOGRADING-BEGIN@@@ (bloc auto-généré par l'outillage enseignant, ne pas éditer à la main)
+      - name: Compilation
+        id: compilation
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: Compilation
+          setup-command: ""
+          command: ./mvnw -B -q compile
+          timeout: 5
+          max-score: 100
+
+      - name: Restaurer le cache des rapports Surefire
+        id: surefire_cache
+        uses: actions/cache/restore@v5
+        with:
+          path: target/surefire-reports
+          key: surefire-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            surefire-${{ github.ref_name }}-
+            surefire-main-
+
+      - name: Détecter les exercices impactés
+        id: scope
+        run: |
+          set +e
+          BEFORE="${{ github.event.before }}"
+          # Cache vide (premier run, expiration GHA) -> regrade complet sinon les
+          # XMLs absents donneraient un score 0 à tout le monde.
+          if [ ! -d target/surefire-reports ] || [ -z "$(ls -A target/surefire-reports 2>/dev/null)" ]; then
+            echo "filter=ALL" >> "$GITHUB_OUTPUT"
+            echo "reason=cache des rapports absent ou expiré" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Premier push sur la branche, ou commit base introuvable -> tout regrader
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "filter=ALL" >> "$GITHUB_OUTPUT"
+            echo "reason=premier push sur la branche ou commit base introuvable" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Fichiers globaux : invalident le cache (regrade complet)
+          if git diff --name-only "$BEFORE" HEAD -- \
+              pom.xml \
+              '.github/workflows/**' \
+              '*.sh' \
+              'src/main/java/fr/univ_amu/iut/App.java' \
+              'src/main/java/fr/univ_amu/iut/module-info.java' \
+              'src/test/java/fr/univ_amu/iut/AppTest.java' \
+              | grep -q .; then
+            echo "filter=ALL" >> "$GITHUB_OUTPUT"
+            echo "reason=fichier global modifié (pom.xml / App / workflows / scripts)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Détection fine : paquets exerciceN / bonusN modifiés
+          pkgs=$(git diff --name-only "$BEFORE" HEAD -- \
+              'src/main/java/fr/univ_amu/iut/exercice*/**' \
+              'src/test/java/fr/univ_amu/iut/exercice*/**' \
+              'src/main/java/fr/univ_amu/iut/bonus*/**' \
+              'src/test/java/fr/univ_amu/iut/bonus*/**' \
+              | grep -oE 'fr/univ_amu/iut/(exercice[0-9]+|bonus[0-9]+)' \
+              | sort -u | tr '/' '.')
+          if [ -z "$pkgs" ]; then
+            echo "filter=NONE" >> "$GITHUB_OUTPUT"
+            echo "reason=aucune source d'exercice modifiée (mvnw test sauté, scores restaurés du cache)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Énumère les classes de test des paquets impactés (FQCN explicites)
+          classes=""
+          for pkg in $pkgs; do
+            pkg_dir="src/test/java/$(echo "$pkg" | tr '.' '/')"
+            while IFS= read -r f; do
+              cls=$(basename "$f" .java)
+              classes="${classes}${classes:+,}${pkg}.${cls}"
+            done < <(find "$pkg_dir" -type f -name '*.java' 2>/dev/null)
+          done
+          if [ -z "$classes" ]; then
+            echo "filter=NONE" >> "$GITHUB_OUTPUT"
+            echo "reason=paquets modifiés mais aucune classe de test trouvée" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "filter=$classes" >> "$GITHUB_OUTPUT"
+          echo "reason=paquets impactés : $(echo $pkgs | tr '\\n' ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Lancer les tests impactés
+        id: run_tests
+        if: steps.scope.outputs.filter != 'NONE'
+        continue-on-error: true
+        run: |
+          echo "Scope : ${{ steps.scope.outputs.reason }}"
+          if [ "${{ steps.scope.outputs.filter }}" = "ALL" ]; then
+            ./mvnw -B test -DfailIfNoTests=false
+          else
+            ./mvnw -B test -Dtest='${{ steps.scope.outputs.filter }}' -DfailIfNoTests=false
+          fi
+
+      - name: "exercice1 : l_annee_2021_n_est_pas_bissextile"
+        id: exercice1_l_annee_2021_n_est_pas_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_2021_n_est_pas_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_2021_n_est_pas_bissextile
+          timeout: 5
+          max-score: 13
+
+      - name: "exercice1 : l_annee_2023_n_est_pas_bissextile"
+        id: exercice1_l_annee_2023_n_est_pas_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_2023_n_est_pas_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_2023_n_est_pas_bissextile
+          timeout: 5
+          max-score: 13
+
+      - name: "exercice1 : l_annee_2025_n_est_pas_bissextile"
+        id: exercice1_l_annee_2025_n_est_pas_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_2025_n_est_pas_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_2025_n_est_pas_bissextile
+          timeout: 5
+          max-score: 13
+
+      - name: "exercice1 : l_annee_2020_est_bissextile"
+        id: exercice1_l_annee_2020_est_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_2020_est_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_2020_est_bissextile
+          timeout: 5
+          max-score: 13
+
+      - name: "exercice1 : l_annee_2024_est_bissextile"
+        id: exercice1_l_annee_2024_est_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_2024_est_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_2024_est_bissextile
+          timeout: 5
+          max-score: 13
+
+      - name: "exercice1 : l_annee_2028_est_bissextile"
+        id: exercice1_l_annee_2028_est_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_2028_est_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_2028_est_bissextile
+          timeout: 5
+          max-score: 13
+
+      - name: "exercice1 : l_annee_1996_est_bissextile"
+        id: exercice1_l_annee_1996_est_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_1996_est_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_1996_est_bissextile
+          timeout: 5
+          max-score: 13
+
+      - name: "exercice1 : l_annee_1804_est_bissextile"
+        id: exercice1_l_annee_1804_est_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_1804_est_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_1804_est_bissextile
+          timeout: 5
+          max-score: 13
+
+      - name: "exercice1 : l_annee_1900_n_est_pas_bissextile"
+        id: exercice1_l_annee_1900_n_est_pas_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_1900_n_est_pas_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_1900_n_est_pas_bissextile
+          timeout: 5
+          max-score: 13
+
+      - name: "exercice1 : l_annee_1700_n_est_pas_bissextile"
+        id: exercice1_l_annee_1700_n_est_pas_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_1700_n_est_pas_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_1700_n_est_pas_bissextile
+          timeout: 5
+          max-score: 13
+
+      - name: "exercice1 : l_annee_2000_est_bissextile"
+        id: exercice1_l_annee_2000_est_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_2000_est_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_2000_est_bissextile
+          timeout: 5
+          max-score: 13
+
+      - name: "exercice1 : l_annee_1600_est_bissextile"
+        id: exercice1_l_annee_1600_est_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_1600_est_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_1600_est_bissextile
+          timeout: 5
+          max-score: 13
+
+      - name: "exercice1 : l_annee_2100_n_est_pas_bissextile"
+        id: exercice1_l_annee_2100_n_est_pas_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_2100_n_est_pas_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_2100_n_est_pas_bissextile
+          timeout: 5
+          max-score: 12
+
+      - name: "exercice1 : l_annee_2400_est_bissextile"
+        id: exercice1_l_annee_2400_est_bissextile
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice1 : l_annee_2400_est_bissextile"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice1.AnneesBissextilesTest l_annee_2400_est_bissextile
+          timeout: 5
+          max-score: 12
+
+      - name: "exercice2 : le_score_initial_est_0_0"
+        id: exercice2_le_score_initial_est_0_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : le_score_initial_est_0_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest le_score_initial_est_0_0
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice2 : apres_un_point_d_alice_le_score_est_15_0"
+        id: exercice2_apres_un_point_d_alice_le_score_est_15_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_un_point_d_alice_le_score_est_15_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_un_point_d_alice_le_score_est_15_0
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice2 : apres_deux_points_d_alice_le_score_est_30_0"
+        id: exercice2_apres_deux_points_d_alice_le_score_est_30_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_deux_points_d_alice_le_score_est_30_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_deux_points_d_alice_le_score_est_30_0
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice2 : apres_trois_points_d_alice_le_score_est_40_0"
+        id: exercice2_apres_trois_points_d_alice_le_score_est_40_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_trois_points_d_alice_le_score_est_40_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_trois_points_d_alice_le_score_est_40_0
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice2 : apres_un_point_de_bob_le_score_est_0_15"
+        id: exercice2_apres_un_point_de_bob_le_score_est_0_15
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_un_point_de_bob_le_score_est_0_15"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_un_point_de_bob_le_score_est_0_15
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice2 : apres_deux_points_de_bob_le_score_est_0_30"
+        id: exercice2_apres_deux_points_de_bob_le_score_est_0_30
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_deux_points_de_bob_le_score_est_0_30"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_deux_points_de_bob_le_score_est_0_30
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice2 : apres_trois_points_de_bob_le_score_est_0_40"
+        id: exercice2_apres_trois_points_de_bob_le_score_est_0_40
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_trois_points_de_bob_le_score_est_0_40"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_trois_points_de_bob_le_score_est_0_40
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice2 : apres_un_point_chacun_le_score_est_15_15"
+        id: exercice2_apres_un_point_chacun_le_score_est_15_15
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_un_point_chacun_le_score_est_15_15"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_un_point_chacun_le_score_est_15_15
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice2 : apres_deux_points_d_alice_et_un_point_de_bob_le_score_est_30_15"
+        id: exercice2_apres_deux_points_d_alice_et_un_point_de_bob_le_score_est_30_15
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_deux_points_d_alice_et_un_point_de_bob_le_score_est_30_15"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_deux_points_d_alice_et_un_point_de_bob_le_score_est_30_15
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice2 : apres_trois_points_d_alice_et_un_point_de_bob_le_score_est_40_15"
+        id: exercice2_apres_trois_points_d_alice_et_un_point_de_bob_le_score_est_40_15
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_trois_points_d_alice_et_un_point_de_bob_le_score_est_40_15"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_trois_points_d_alice_et_un_point_de_bob_le_score_est_40_15
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice2 : apres_trois_points_d_alice_et_deux_points_de_bob_le_score_est_40_30"
+        id: exercice2_apres_trois_points_d_alice_et_deux_points_de_bob_le_score_est_40_30
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_trois_points_d_alice_et_deux_points_de_bob_le_score_est_40_30"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_trois_points_d_alice_et_deux_points_de_bob_le_score_est_40_30
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice2 : apres_deux_points_chacun_le_score_est_30_30"
+        id: exercice2_apres_deux_points_chacun_le_score_est_30_30
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_deux_points_chacun_le_score_est_30_30"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_deux_points_chacun_le_score_est_30_30
+          timeout: 5
+          max-score: 9
+
+      - name: "exercice2 : apres_trois_points_chacun_le_score_est_egalite"
+        id: exercice2_apres_trois_points_chacun_le_score_est_egalite
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_trois_points_chacun_le_score_est_egalite"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_trois_points_chacun_le_score_est_egalite
+          timeout: 5
+          max-score: 8
+
+      - name: "exercice2 : apres_egalite_et_un_point_d_alice_le_score_est_avantage_alice"
+        id: exercice2_apres_egalite_et_un_point_d_alice_le_score_est_avantage_alice
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_egalite_et_un_point_d_alice_le_score_est_avantage_alice"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_egalite_et_un_point_d_alice_le_score_est_avantage_alice
+          timeout: 5
+          max-score: 8
+
+      - name: "exercice2 : apres_egalite_et_un_point_de_bob_le_score_est_avantage_bob"
+        id: exercice2_apres_egalite_et_un_point_de_bob_le_score_est_avantage_bob
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_egalite_et_un_point_de_bob_le_score_est_avantage_bob"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_egalite_et_un_point_de_bob_le_score_est_avantage_bob
+          timeout: 5
+          max-score: 8
+
+      - name: "exercice2 : apres_avantage_alice_et_un_point_de_bob_le_score_revient_a_egalite"
+        id: exercice2_apres_avantage_alice_et_un_point_de_bob_le_score_revient_a_egalite
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_avantage_alice_et_un_point_de_bob_le_score_revient_a_egalite"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_avantage_alice_et_un_point_de_bob_le_score_revient_a_egalite
+          timeout: 5
+          max-score: 8
+
+      - name: "exercice2 : apres_avantage_alice_et_un_point_d_alice_alice_a_gagne"
+        id: exercice2_apres_avantage_alice_et_un_point_d_alice_alice_a_gagne
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_avantage_alice_et_un_point_d_alice_alice_a_gagne"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_avantage_alice_et_un_point_d_alice_alice_a_gagne
+          timeout: 5
+          max-score: 8
+
+      - name: "exercice2 : apres_quatre_points_d_alice_alice_a_gagne"
+        id: exercice2_apres_quatre_points_d_alice_alice_a_gagne
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_quatre_points_d_alice_alice_a_gagne"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_quatre_points_d_alice_alice_a_gagne
+          timeout: 5
+          max-score: 8
+
+      - name: "exercice2 : apres_quatre_points_de_bob_bob_a_gagne"
+        id: exercice2_apres_quatre_points_de_bob_bob_a_gagne
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_quatre_points_de_bob_bob_a_gagne"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_quatre_points_de_bob_bob_a_gagne
+          timeout: 5
+          max-score: 8
+
+      - name: "exercice2 : apres_quatre_points_d_alice_et_un_point_de_bob_alice_a_gagne"
+        id: exercice2_apres_quatre_points_d_alice_et_un_point_de_bob_alice_a_gagne
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_quatre_points_d_alice_et_un_point_de_bob_alice_a_gagne"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_quatre_points_d_alice_et_un_point_de_bob_alice_a_gagne
+          timeout: 5
+          max-score: 8
+
+      - name: "exercice2 : apres_quatre_points_d_alice_et_deux_points_de_bob_alice_a_gagne"
+        id: exercice2_apres_quatre_points_d_alice_et_deux_points_de_bob_alice_a_gagne
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice2 : apres_quatre_points_d_alice_et_deux_points_de_bob_alice_a_gagne"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice2.JeuDeTennisTest apres_quatre_points_d_alice_et_deux_points_de_bob_alice_a_gagne
+          timeout: 5
+          max-score: 8
+
+      - name: "exercice3 : la_liste_vide_n_a_aucun_majeur"
+        id: exercice3_la_liste_vide_n_a_aucun_majeur
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : la_liste_vide_n_a_aucun_majeur"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.GestionnaireEmployesTest la_liste_vide_n_a_aucun_majeur
+          timeout: 5
+          max-score: 26
+
+      - name: "exercice3 : le_gestionnaire_filtre_les_majeurs"
+        id: exercice3_le_gestionnaire_filtre_les_majeurs
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_gestionnaire_filtre_les_majeurs"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.GestionnaireEmployesTest le_gestionnaire_filtre_les_majeurs
+          timeout: 5
+          max-score: 26
+
+      - name: "exercice3 : la_personne_de_18_ans_est_majeure"
+        id: exercice3_la_personne_de_18_ans_est_majeure
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : la_personne_de_18_ans_est_majeure"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.GestionnaireEmployesTest la_personne_de_18_ans_est_majeure
+          timeout: 5
+          max-score: 26
+
+      - name: "exercice3 : le_gestionnaire_calcule_l_age_moyen_des_majeurs"
+        id: exercice3_le_gestionnaire_calcule_l_age_moyen_des_majeurs
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_gestionnaire_calcule_l_age_moyen_des_majeurs"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.GestionnaireEmployesTest le_gestionnaire_calcule_l_age_moyen_des_majeurs
+          timeout: 5
+          max-score: 26
+
+      - name: "exercice3 : l_age_moyen_sans_majeur_vaut_0"
+        id: exercice3_l_age_moyen_sans_majeur_vaut_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : l_age_moyen_sans_majeur_vaut_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.GestionnaireEmployesTest l_age_moyen_sans_majeur_vaut_0
+          timeout: 5
+          max-score: 26
+
+      - name: "exercice3 : le_gestionnaire_trie_alphabetiquement"
+        id: exercice3_le_gestionnaire_trie_alphabetiquement
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_gestionnaire_trie_alphabetiquement"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.GestionnaireEmployesTest le_gestionnaire_trie_alphabetiquement
+          timeout: 5
+          max-score: 25
+
+      - name: "exercice3 : le_gestionnaire_trie_par_age_croissant"
+        id: exercice3_le_gestionnaire_trie_par_age_croissant
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice3 : le_gestionnaire_trie_par_age_croissant"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice3.GestionnaireEmployesTest le_gestionnaire_trie_par_age_croissant
+          timeout: 5
+          max-score: 25
+
+      - name: "exercice4 : la_pagination_d_une_seule_page_n_affiche_qu_elle_meme"
+        id: exercice4_la_pagination_d_une_seule_page_n_affiche_qu_elle_meme
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : la_pagination_d_une_seule_page_n_affiche_qu_elle_meme"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.PaginationTest la_pagination_d_une_seule_page_n_affiche_qu_elle_meme
+          timeout: 5
+          max-score: 18
+
+      - name: "exercice4 : la_pagination_de_5_pages_avec_courant_au_milieu_affiche_toutes_les_pages"
+        id: exercice4_la_pagination_de_5_pages_avec_courant_au_milieu_affiche_toutes_les_pages
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : la_pagination_de_5_pages_avec_courant_au_milieu_affiche_toutes_les_pages"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.PaginationTest la_pagination_de_5_pages_avec_courant_au_milieu_affiche_toutes_les_pages
+          timeout: 5
+          max-score: 18
+
+      - name: "exercice4 : la_pagination_de_5_pages_avec_courant_au_debut_affiche_toutes_les_pages"
+        id: exercice4_la_pagination_de_5_pages_avec_courant_au_debut_affiche_toutes_les_pages
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : la_pagination_de_5_pages_avec_courant_au_debut_affiche_toutes_les_pages"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.PaginationTest la_pagination_de_5_pages_avec_courant_au_debut_affiche_toutes_les_pages
+          timeout: 5
+          max-score: 18
+
+      - name: "exercice4 : la_pagination_de_5_pages_avec_courant_a_la_fin_affiche_toutes_les_pages"
+        id: exercice4_la_pagination_de_5_pages_avec_courant_a_la_fin_affiche_toutes_les_pages
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : la_pagination_de_5_pages_avec_courant_a_la_fin_affiche_toutes_les_pages"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.PaginationTest la_pagination_de_5_pages_avec_courant_a_la_fin_affiche_toutes_les_pages
+          timeout: 5
+          max-score: 18
+
+      - name: "exercice4 : la_pagination_de_7_pages_affiche_toutes_les_pages"
+        id: exercice4_la_pagination_de_7_pages_affiche_toutes_les_pages
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : la_pagination_de_7_pages_affiche_toutes_les_pages"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.PaginationTest la_pagination_de_7_pages_affiche_toutes_les_pages
+          timeout: 5
+          max-score: 18
+
+      - name: "exercice4 : la_pagination_de_15_pages_avec_courant_au_milieu_affiche_des_ellipses_des_deux_cotes"
+        id: exercice4_la_pagination_de_15_pages_avec_courant_au_milieu_affiche_des_ellipses_des_deux_cotes
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : la_pagination_de_15_pages_avec_courant_au_milieu_affiche_des_ellipses_des_deux_cotes"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.PaginationTest la_pagination_de_15_pages_avec_courant_au_milieu_affiche_des_ellipses_des_deux_cotes
+          timeout: 5
+          max-score: 18
+
+      - name: "exercice4 : la_pagination_de_15_pages_avec_courant_pres_du_debut_n_affiche_qu_une_ellipse_a_droite"
+        id: exercice4_la_pagination_de_15_pages_avec_courant_pres_du_debut_n_affiche_qu_une_ellipse_a_droite
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : la_pagination_de_15_pages_avec_courant_pres_du_debut_n_affiche_qu_une_ellipse_a_droite"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.PaginationTest la_pagination_de_15_pages_avec_courant_pres_du_debut_n_affiche_qu_une_ellipse_a_droite
+          timeout: 5
+          max-score: 18
+
+      - name: "exercice4 : la_pagination_de_15_pages_avec_courant_pres_de_la_fin_n_affiche_qu_une_ellipse_a_gauche"
+        id: exercice4_la_pagination_de_15_pages_avec_courant_pres_de_la_fin_n_affiche_qu_une_ellipse_a_gauche
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : la_pagination_de_15_pages_avec_courant_pres_de_la_fin_n_affiche_qu_une_ellipse_a_gauche"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.PaginationTest la_pagination_de_15_pages_avec_courant_pres_de_la_fin_n_affiche_qu_une_ellipse_a_gauche
+          timeout: 5
+          max-score: 18
+
+      - name: "exercice4 : la_pagination_de_15_pages_avec_courant_en_seconde_position"
+        id: exercice4_la_pagination_de_15_pages_avec_courant_en_seconde_position
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : la_pagination_de_15_pages_avec_courant_en_seconde_position"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.PaginationTest la_pagination_de_15_pages_avec_courant_en_seconde_position
+          timeout: 5
+          max-score: 18
+
+      - name: "exercice4 : la_pagination_de_15_pages_avec_courant_en_avant_derniere_position"
+        id: exercice4_la_pagination_de_15_pages_avec_courant_en_avant_derniere_position
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice4 : la_pagination_de_15_pages_avec_courant_en_avant_derniere_position"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice4.PaginationTest la_pagination_de_15_pages_avec_courant_en_avant_derniere_position
+          timeout: 5
+          max-score: 18
+
+      - name: "exercice5 : la_chance_donne_la_somme_des_des"
+        id: exercice5_la_chance_donne_la_somme_des_des
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_chance_donne_la_somme_des_des"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_chance_donne_la_somme_des_des
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : la_chance_avec_cinq_uns_vaut_5"
+        id: exercice5_la_chance_avec_cinq_uns_vaut_5
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_chance_avec_cinq_uns_vaut_5"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_chance_avec_cinq_uns_vaut_5
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : la_chance_avec_cinq_six_vaut_30"
+        id: exercice5_la_chance_avec_cinq_six_vaut_30
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_chance_avec_cinq_six_vaut_30"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_chance_avec_cinq_six_vaut_30
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : le_yahtzee_avec_cinq_quatre_vaut_50"
+        id: exercice5_le_yahtzee_avec_cinq_quatre_vaut_50
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_yahtzee_avec_cinq_quatre_vaut_50"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_yahtzee_avec_cinq_quatre_vaut_50
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : le_yahtzee_avec_cinq_uns_vaut_50"
+        id: exercice5_le_yahtzee_avec_cinq_uns_vaut_50
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_yahtzee_avec_cinq_uns_vaut_50"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_yahtzee_avec_cinq_uns_vaut_50
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : le_yahtzee_avec_quatre_uns_et_un_deux_vaut_0"
+        id: exercice5_le_yahtzee_avec_quatre_uns_et_un_deux_vaut_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_yahtzee_avec_quatre_uns_et_un_deux_vaut_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_yahtzee_avec_quatre_uns_et_un_deux_vaut_0
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : le_yahtzee_avec_cinq_des_tous_differents_vaut_0"
+        id: exercice5_le_yahtzee_avec_cinq_des_tous_differents_vaut_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_yahtzee_avec_cinq_des_tous_differents_vaut_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_yahtzee_avec_cinq_des_tous_differents_vaut_0
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : le_decompte_compte_trois_uns"
+        id: exercice5_le_decompte_compte_trois_uns
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_decompte_compte_trois_uns"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_decompte_compte_trois_uns
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : le_decompte_compte_deux_six"
+        id: exercice5_le_decompte_compte_deux_six
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_decompte_compte_deux_six"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_decompte_compte_deux_six
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : le_decompte_retourne_zero_si_face_absente"
+        id: exercice5_le_decompte_retourne_zero_si_face_absente
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_decompte_retourne_zero_si_face_absente"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_decompte_retourne_zero_si_face_absente
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : la_paire_avec_deux_trois_vaut_6"
+        id: exercice5_la_paire_avec_deux_trois_vaut_6
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_paire_avec_deux_trois_vaut_6"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_paire_avec_deux_trois_vaut_6
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : la_paire_retourne_la_plus_haute"
+        id: exercice5_la_paire_retourne_la_plus_haute
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_paire_retourne_la_plus_haute"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_paire_retourne_la_plus_haute
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : la_paire_avec_quatre_six_vaut_12"
+        id: exercice5_la_paire_avec_quatre_six_vaut_12
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_paire_avec_quatre_six_vaut_12"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_paire_avec_quatre_six_vaut_12
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : la_paire_sans_aucune_paire_vaut_0"
+        id: exercice5_la_paire_sans_aucune_paire_vaut_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_paire_sans_aucune_paire_vaut_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_paire_sans_aucune_paire_vaut_0
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : les_deux_paires_donnent_la_somme_des_deux"
+        id: exercice5_les_deux_paires_donnent_la_somme_des_deux
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : les_deux_paires_donnent_la_somme_des_deux"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest les_deux_paires_donnent_la_somme_des_deux
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : les_deux_paires_prennent_les_deux_plus_hautes"
+        id: exercice5_les_deux_paires_prennent_les_deux_plus_hautes
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : les_deux_paires_prennent_les_deux_plus_hautes"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest les_deux_paires_prennent_les_deux_plus_hautes
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : les_deux_paires_refusent_une_seule_paire"
+        id: exercice5_les_deux_paires_refusent_une_seule_paire
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : les_deux_paires_refusent_une_seule_paire"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest les_deux_paires_refusent_une_seule_paire
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : les_deux_paires_refusent_un_brelan_seul"
+        id: exercice5_les_deux_paires_refusent_un_brelan_seul
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : les_deux_paires_refusent_un_brelan_seul"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest les_deux_paires_refusent_un_brelan_seul
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : le_brelan_avec_trois_des_donne_la_somme"
+        id: exercice5_le_brelan_avec_trois_des_donne_la_somme
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_brelan_avec_trois_des_donne_la_somme"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_brelan_avec_trois_des_donne_la_somme
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : le_brelan_avec_cinq_des_identiques_prend_trois"
+        id: exercice5_le_brelan_avec_cinq_des_identiques_prend_trois
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_brelan_avec_cinq_des_identiques_prend_trois"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_brelan_avec_cinq_des_identiques_prend_trois
+          timeout: 5
+          max-score: 6
+
+      - name: "exercice5 : le_brelan_sans_aucun_brelan_vaut_0"
+        id: exercice5_le_brelan_sans_aucun_brelan_vaut_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_brelan_sans_aucun_brelan_vaut_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_brelan_sans_aucun_brelan_vaut_0
+          timeout: 5
+          max-score: 5
+
+      - name: "exercice5 : la_petite_suite_1_a_5_vaut_15"
+        id: exercice5_la_petite_suite_1_a_5_vaut_15
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_petite_suite_1_a_5_vaut_15"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_petite_suite_1_a_5_vaut_15
+          timeout: 5
+          max-score: 5
+
+      - name: "exercice5 : la_petite_suite_dans_un_ordre_quelconque_vaut_15"
+        id: exercice5_la_petite_suite_dans_un_ordre_quelconque_vaut_15
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_petite_suite_dans_un_ordre_quelconque_vaut_15"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_petite_suite_dans_un_ordre_quelconque_vaut_15
+          timeout: 5
+          max-score: 5
+
+      - name: "exercice5 : la_petite_suite_avec_un_de_double_vaut_0"
+        id: exercice5_la_petite_suite_avec_un_de_double_vaut_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_petite_suite_avec_un_de_double_vaut_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_petite_suite_avec_un_de_double_vaut_0
+          timeout: 5
+          max-score: 5
+
+      - name: "exercice5 : la_petite_suite_de_2_a_6_vaut_0"
+        id: exercice5_la_petite_suite_de_2_a_6_vaut_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_petite_suite_de_2_a_6_vaut_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_petite_suite_de_2_a_6_vaut_0
+          timeout: 5
+          max-score: 5
+
+      - name: "exercice5 : la_grande_suite_2_a_6_vaut_20"
+        id: exercice5_la_grande_suite_2_a_6_vaut_20
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grande_suite_2_a_6_vaut_20"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_grande_suite_2_a_6_vaut_20
+          timeout: 5
+          max-score: 5
+
+      - name: "exercice5 : la_grande_suite_de_1_a_5_vaut_0"
+        id: exercice5_la_grande_suite_de_1_a_5_vaut_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grande_suite_de_1_a_5_vaut_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_grande_suite_de_1_a_5_vaut_0
+          timeout: 5
+          max-score: 5
+
+      - name: "exercice5 : la_grande_suite_avec_un_de_double_vaut_0"
+        id: exercice5_la_grande_suite_avec_un_de_double_vaut_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : la_grande_suite_avec_un_de_double_vaut_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest la_grande_suite_avec_un_de_double_vaut_0
+          timeout: 5
+          max-score: 5
+
+      - name: "exercice5 : le_full_avec_brelan_de_2_et_paire_de_6_donne_la_somme_des_5_des"
+        id: exercice5_le_full_avec_brelan_de_2_et_paire_de_6_donne_la_somme_des_5_des
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_full_avec_brelan_de_2_et_paire_de_6_donne_la_somme_des_5_des"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_full_avec_brelan_de_2_et_paire_de_6_donne_la_somme_des_5_des
+          timeout: 5
+          max-score: 5
+
+      - name: "exercice5 : le_full_avec_brelan_de_5_et_paire_de_3_donne_la_somme_des_5_des"
+        id: exercice5_le_full_avec_brelan_de_5_et_paire_de_3_donne_la_somme_des_5_des
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_full_avec_brelan_de_5_et_paire_de_3_donne_la_somme_des_5_des"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_full_avec_brelan_de_5_et_paire_de_3_donne_la_somme_des_5_des
+          timeout: 5
+          max-score: 5
+
+      - name: "exercice5 : le_full_sans_brelan_vaut_0"
+        id: exercice5_le_full_sans_brelan_vaut_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_full_sans_brelan_vaut_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_full_sans_brelan_vaut_0
+          timeout: 5
+          max-score: 5
+
+      - name: "exercice5 : le_full_sans_paire_vaut_0"
+        id: exercice5_le_full_sans_paire_vaut_0
+        uses: IUTInfoAix-R202/autograding-command-grader@main
+        with:
+          test-name: "exercice5 : le_full_sans_paire_vaut_0"
+          setup-command: ""
+          command: ./grade-test.sh fr.univ_amu.iut.exercice5.YahtzeeTest le_full_sans_paire_vaut_0
+          timeout: 5
+          max-score: 5
+
+      - name: Autograding Reporter
+        uses: IUTInfoAix-R202/autograding-grading-reporter@main
+        continue-on-error: true
+        env:
+          COMPILATION_RESULTS: "${{ steps.compilation.outputs.result }}"
+          EXERCICE1_L_ANNEE_2021_N_EST_PAS_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_2021_n_est_pas_bissextile.outputs.result }}"
+          EXERCICE1_L_ANNEE_2023_N_EST_PAS_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_2023_n_est_pas_bissextile.outputs.result }}"
+          EXERCICE1_L_ANNEE_2025_N_EST_PAS_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_2025_n_est_pas_bissextile.outputs.result }}"
+          EXERCICE1_L_ANNEE_2020_EST_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_2020_est_bissextile.outputs.result }}"
+          EXERCICE1_L_ANNEE_2024_EST_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_2024_est_bissextile.outputs.result }}"
+          EXERCICE1_L_ANNEE_2028_EST_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_2028_est_bissextile.outputs.result }}"
+          EXERCICE1_L_ANNEE_1996_EST_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_1996_est_bissextile.outputs.result }}"
+          EXERCICE1_L_ANNEE_1804_EST_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_1804_est_bissextile.outputs.result }}"
+          EXERCICE1_L_ANNEE_1900_N_EST_PAS_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_1900_n_est_pas_bissextile.outputs.result }}"
+          EXERCICE1_L_ANNEE_1700_N_EST_PAS_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_1700_n_est_pas_bissextile.outputs.result }}"
+          EXERCICE1_L_ANNEE_2000_EST_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_2000_est_bissextile.outputs.result }}"
+          EXERCICE1_L_ANNEE_1600_EST_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_1600_est_bissextile.outputs.result }}"
+          EXERCICE1_L_ANNEE_2100_N_EST_PAS_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_2100_n_est_pas_bissextile.outputs.result }}"
+          EXERCICE1_L_ANNEE_2400_EST_BISSEXTILE_RESULTS: "${{ steps.exercice1_l_annee_2400_est_bissextile.outputs.result }}"
+          EXERCICE2_LE_SCORE_INITIAL_EST_0_0_RESULTS: "${{ steps.exercice2_le_score_initial_est_0_0.outputs.result }}"
+          EXERCICE2_APRES_UN_POINT_D_ALICE_LE_SCORE_EST_15_0_RESULTS: "${{ steps.exercice2_apres_un_point_d_alice_le_score_est_15_0.outputs.result }}"
+          EXERCICE2_APRES_DEUX_POINTS_D_ALICE_LE_SCORE_EST_30_0_RESULTS: "${{ steps.exercice2_apres_deux_points_d_alice_le_score_est_30_0.outputs.result }}"
+          EXERCICE2_APRES_TROIS_POINTS_D_ALICE_LE_SCORE_EST_40_0_RESULTS: "${{ steps.exercice2_apres_trois_points_d_alice_le_score_est_40_0.outputs.result }}"
+          EXERCICE2_APRES_UN_POINT_DE_BOB_LE_SCORE_EST_0_15_RESULTS: "${{ steps.exercice2_apres_un_point_de_bob_le_score_est_0_15.outputs.result }}"
+          EXERCICE2_APRES_DEUX_POINTS_DE_BOB_LE_SCORE_EST_0_30_RESULTS: "${{ steps.exercice2_apres_deux_points_de_bob_le_score_est_0_30.outputs.result }}"
+          EXERCICE2_APRES_TROIS_POINTS_DE_BOB_LE_SCORE_EST_0_40_RESULTS: "${{ steps.exercice2_apres_trois_points_de_bob_le_score_est_0_40.outputs.result }}"
+          EXERCICE2_APRES_UN_POINT_CHACUN_LE_SCORE_EST_15_15_RESULTS: "${{ steps.exercice2_apres_un_point_chacun_le_score_est_15_15.outputs.result }}"
+          EXERCICE2_APRES_DEUX_POINTS_D_ALICE_ET_UN_POINT_DE_BOB_LE_SCORE_EST_30_15_RESULTS: "${{ steps.exercice2_apres_deux_points_d_alice_et_un_point_de_bob_le_score_est_30_15.outputs.result }}"
+          EXERCICE2_APRES_TROIS_POINTS_D_ALICE_ET_UN_POINT_DE_BOB_LE_SCORE_EST_40_15_RESULTS: "${{ steps.exercice2_apres_trois_points_d_alice_et_un_point_de_bob_le_score_est_40_15.outputs.result }}"
+          EXERCICE2_APRES_TROIS_POINTS_D_ALICE_ET_DEUX_POINTS_DE_BOB_LE_SCORE_EST_40_30_RESULTS: "${{ steps.exercice2_apres_trois_points_d_alice_et_deux_points_de_bob_le_score_est_40_30.outputs.result }}"
+          EXERCICE2_APRES_DEUX_POINTS_CHACUN_LE_SCORE_EST_30_30_RESULTS: "${{ steps.exercice2_apres_deux_points_chacun_le_score_est_30_30.outputs.result }}"
+          EXERCICE2_APRES_TROIS_POINTS_CHACUN_LE_SCORE_EST_EGALITE_RESULTS: "${{ steps.exercice2_apres_trois_points_chacun_le_score_est_egalite.outputs.result }}"
+          EXERCICE2_APRES_EGALITE_ET_UN_POINT_D_ALICE_LE_SCORE_EST_AVANTAGE_ALICE_RESULTS: "${{ steps.exercice2_apres_egalite_et_un_point_d_alice_le_score_est_avantage_alice.outputs.result }}"
+          EXERCICE2_APRES_EGALITE_ET_UN_POINT_DE_BOB_LE_SCORE_EST_AVANTAGE_BOB_RESULTS: "${{ steps.exercice2_apres_egalite_et_un_point_de_bob_le_score_est_avantage_bob.outputs.result }}"
+          EXERCICE2_APRES_AVANTAGE_ALICE_ET_UN_POINT_DE_BOB_LE_SCORE_REVIENT_A_EGALITE_RESULTS: "${{ steps.exercice2_apres_avantage_alice_et_un_point_de_bob_le_score_revient_a_egalite.outputs.result }}"
+          EXERCICE2_APRES_AVANTAGE_ALICE_ET_UN_POINT_D_ALICE_ALICE_A_GAGNE_RESULTS: "${{ steps.exercice2_apres_avantage_alice_et_un_point_d_alice_alice_a_gagne.outputs.result }}"
+          EXERCICE2_APRES_QUATRE_POINTS_D_ALICE_ALICE_A_GAGNE_RESULTS: "${{ steps.exercice2_apres_quatre_points_d_alice_alice_a_gagne.outputs.result }}"
+          EXERCICE2_APRES_QUATRE_POINTS_DE_BOB_BOB_A_GAGNE_RESULTS: "${{ steps.exercice2_apres_quatre_points_de_bob_bob_a_gagne.outputs.result }}"
+          EXERCICE2_APRES_QUATRE_POINTS_D_ALICE_ET_UN_POINT_DE_BOB_ALICE_A_GAGNE_RESULTS: "${{ steps.exercice2_apres_quatre_points_d_alice_et_un_point_de_bob_alice_a_gagne.outputs.result }}"
+          EXERCICE2_APRES_QUATRE_POINTS_D_ALICE_ET_DEUX_POINTS_DE_BOB_ALICE_A_GAGNE_RESULTS: "${{ steps.exercice2_apres_quatre_points_d_alice_et_deux_points_de_bob_alice_a_gagne.outputs.result }}"
+          EXERCICE3_LA_LISTE_VIDE_N_A_AUCUN_MAJEUR_RESULTS: "${{ steps.exercice3_la_liste_vide_n_a_aucun_majeur.outputs.result }}"
+          EXERCICE3_LE_GESTIONNAIRE_FILTRE_LES_MAJEURS_RESULTS: "${{ steps.exercice3_le_gestionnaire_filtre_les_majeurs.outputs.result }}"
+          EXERCICE3_LA_PERSONNE_DE_18_ANS_EST_MAJEURE_RESULTS: "${{ steps.exercice3_la_personne_de_18_ans_est_majeure.outputs.result }}"
+          EXERCICE3_LE_GESTIONNAIRE_CALCULE_L_AGE_MOYEN_DES_MAJEURS_RESULTS: "${{ steps.exercice3_le_gestionnaire_calcule_l_age_moyen_des_majeurs.outputs.result }}"
+          EXERCICE3_L_AGE_MOYEN_SANS_MAJEUR_VAUT_0_RESULTS: "${{ steps.exercice3_l_age_moyen_sans_majeur_vaut_0.outputs.result }}"
+          EXERCICE3_LE_GESTIONNAIRE_TRIE_ALPHABETIQUEMENT_RESULTS: "${{ steps.exercice3_le_gestionnaire_trie_alphabetiquement.outputs.result }}"
+          EXERCICE3_LE_GESTIONNAIRE_TRIE_PAR_AGE_CROISSANT_RESULTS: "${{ steps.exercice3_le_gestionnaire_trie_par_age_croissant.outputs.result }}"
+          EXERCICE4_LA_PAGINATION_D_UNE_SEULE_PAGE_N_AFFICHE_QU_ELLE_MEME_RESULTS: "${{ steps.exercice4_la_pagination_d_une_seule_page_n_affiche_qu_elle_meme.outputs.result }}"
+          EXERCICE4_LA_PAGINATION_DE_5_PAGES_AVEC_COURANT_AU_MILIEU_AFFICHE_TOUTES_LES_PAGES_RESULTS: "${{ steps.exercice4_la_pagination_de_5_pages_avec_courant_au_milieu_affiche_toutes_les_pages.outputs.result }}"
+          EXERCICE4_LA_PAGINATION_DE_5_PAGES_AVEC_COURANT_AU_DEBUT_AFFICHE_TOUTES_LES_PAGES_RESULTS: "${{ steps.exercice4_la_pagination_de_5_pages_avec_courant_au_debut_affiche_toutes_les_pages.outputs.result }}"
+          EXERCICE4_LA_PAGINATION_DE_5_PAGES_AVEC_COURANT_A_LA_FIN_AFFICHE_TOUTES_LES_PAGES_RESULTS: "${{ steps.exercice4_la_pagination_de_5_pages_avec_courant_a_la_fin_affiche_toutes_les_pages.outputs.result }}"
+          EXERCICE4_LA_PAGINATION_DE_7_PAGES_AFFICHE_TOUTES_LES_PAGES_RESULTS: "${{ steps.exercice4_la_pagination_de_7_pages_affiche_toutes_les_pages.outputs.result }}"
+          EXERCICE4_LA_PAGINATION_DE_15_PAGES_AVEC_COURANT_AU_MILIEU_AFFICHE_DES_ELLIPSES_DES_DEUX_COTES_RESULTS: "${{ steps.exercice4_la_pagination_de_15_pages_avec_courant_au_milieu_affiche_des_ellipses_des_deux_cotes.outputs.result }}"
+          EXERCICE4_LA_PAGINATION_DE_15_PAGES_AVEC_COURANT_PRES_DU_DEBUT_N_AFFICHE_QU_UNE_ELLIPSE_A_DROITE_RESULTS: "${{ steps.exercice4_la_pagination_de_15_pages_avec_courant_pres_du_debut_n_affiche_qu_une_ellipse_a_droite.outputs.result }}"
+          EXERCICE4_LA_PAGINATION_DE_15_PAGES_AVEC_COURANT_PRES_DE_LA_FIN_N_AFFICHE_QU_UNE_ELLIPSE_A_GAUCHE_RESULTS: "${{ steps.exercice4_la_pagination_de_15_pages_avec_courant_pres_de_la_fin_n_affiche_qu_une_ellipse_a_gauche.outputs.result }}"
+          EXERCICE4_LA_PAGINATION_DE_15_PAGES_AVEC_COURANT_EN_SECONDE_POSITION_RESULTS: "${{ steps.exercice4_la_pagination_de_15_pages_avec_courant_en_seconde_position.outputs.result }}"
+          EXERCICE4_LA_PAGINATION_DE_15_PAGES_AVEC_COURANT_EN_AVANT_DERNIERE_POSITION_RESULTS: "${{ steps.exercice4_la_pagination_de_15_pages_avec_courant_en_avant_derniere_position.outputs.result }}"
+          EXERCICE5_LA_CHANCE_DONNE_LA_SOMME_DES_DES_RESULTS: "${{ steps.exercice5_la_chance_donne_la_somme_des_des.outputs.result }}"
+          EXERCICE5_LA_CHANCE_AVEC_CINQ_UNS_VAUT_5_RESULTS: "${{ steps.exercice5_la_chance_avec_cinq_uns_vaut_5.outputs.result }}"
+          EXERCICE5_LA_CHANCE_AVEC_CINQ_SIX_VAUT_30_RESULTS: "${{ steps.exercice5_la_chance_avec_cinq_six_vaut_30.outputs.result }}"
+          EXERCICE5_LE_YAHTZEE_AVEC_CINQ_QUATRE_VAUT_50_RESULTS: "${{ steps.exercice5_le_yahtzee_avec_cinq_quatre_vaut_50.outputs.result }}"
+          EXERCICE5_LE_YAHTZEE_AVEC_CINQ_UNS_VAUT_50_RESULTS: "${{ steps.exercice5_le_yahtzee_avec_cinq_uns_vaut_50.outputs.result }}"
+          EXERCICE5_LE_YAHTZEE_AVEC_QUATRE_UNS_ET_UN_DEUX_VAUT_0_RESULTS: "${{ steps.exercice5_le_yahtzee_avec_quatre_uns_et_un_deux_vaut_0.outputs.result }}"
+          EXERCICE5_LE_YAHTZEE_AVEC_CINQ_DES_TOUS_DIFFERENTS_VAUT_0_RESULTS: "${{ steps.exercice5_le_yahtzee_avec_cinq_des_tous_differents_vaut_0.outputs.result }}"
+          EXERCICE5_LE_DECOMPTE_COMPTE_TROIS_UNS_RESULTS: "${{ steps.exercice5_le_decompte_compte_trois_uns.outputs.result }}"
+          EXERCICE5_LE_DECOMPTE_COMPTE_DEUX_SIX_RESULTS: "${{ steps.exercice5_le_decompte_compte_deux_six.outputs.result }}"
+          EXERCICE5_LE_DECOMPTE_RETOURNE_ZERO_SI_FACE_ABSENTE_RESULTS: "${{ steps.exercice5_le_decompte_retourne_zero_si_face_absente.outputs.result }}"
+          EXERCICE5_LA_PAIRE_AVEC_DEUX_TROIS_VAUT_6_RESULTS: "${{ steps.exercice5_la_paire_avec_deux_trois_vaut_6.outputs.result }}"
+          EXERCICE5_LA_PAIRE_RETOURNE_LA_PLUS_HAUTE_RESULTS: "${{ steps.exercice5_la_paire_retourne_la_plus_haute.outputs.result }}"
+          EXERCICE5_LA_PAIRE_AVEC_QUATRE_SIX_VAUT_12_RESULTS: "${{ steps.exercice5_la_paire_avec_quatre_six_vaut_12.outputs.result }}"
+          EXERCICE5_LA_PAIRE_SANS_AUCUNE_PAIRE_VAUT_0_RESULTS: "${{ steps.exercice5_la_paire_sans_aucune_paire_vaut_0.outputs.result }}"
+          EXERCICE5_LES_DEUX_PAIRES_DONNENT_LA_SOMME_DES_DEUX_RESULTS: "${{ steps.exercice5_les_deux_paires_donnent_la_somme_des_deux.outputs.result }}"
+          EXERCICE5_LES_DEUX_PAIRES_PRENNENT_LES_DEUX_PLUS_HAUTES_RESULTS: "${{ steps.exercice5_les_deux_paires_prennent_les_deux_plus_hautes.outputs.result }}"
+          EXERCICE5_LES_DEUX_PAIRES_REFUSENT_UNE_SEULE_PAIRE_RESULTS: "${{ steps.exercice5_les_deux_paires_refusent_une_seule_paire.outputs.result }}"
+          EXERCICE5_LES_DEUX_PAIRES_REFUSENT_UN_BRELAN_SEUL_RESULTS: "${{ steps.exercice5_les_deux_paires_refusent_un_brelan_seul.outputs.result }}"
+          EXERCICE5_LE_BRELAN_AVEC_TROIS_DES_DONNE_LA_SOMME_RESULTS: "${{ steps.exercice5_le_brelan_avec_trois_des_donne_la_somme.outputs.result }}"
+          EXERCICE5_LE_BRELAN_AVEC_CINQ_DES_IDENTIQUES_PREND_TROIS_RESULTS: "${{ steps.exercice5_le_brelan_avec_cinq_des_identiques_prend_trois.outputs.result }}"
+          EXERCICE5_LE_BRELAN_SANS_AUCUN_BRELAN_VAUT_0_RESULTS: "${{ steps.exercice5_le_brelan_sans_aucun_brelan_vaut_0.outputs.result }}"
+          EXERCICE5_LA_PETITE_SUITE_1_A_5_VAUT_15_RESULTS: "${{ steps.exercice5_la_petite_suite_1_a_5_vaut_15.outputs.result }}"
+          EXERCICE5_LA_PETITE_SUITE_DANS_UN_ORDRE_QUELCONQUE_VAUT_15_RESULTS: "${{ steps.exercice5_la_petite_suite_dans_un_ordre_quelconque_vaut_15.outputs.result }}"
+          EXERCICE5_LA_PETITE_SUITE_AVEC_UN_DE_DOUBLE_VAUT_0_RESULTS: "${{ steps.exercice5_la_petite_suite_avec_un_de_double_vaut_0.outputs.result }}"
+          EXERCICE5_LA_PETITE_SUITE_DE_2_A_6_VAUT_0_RESULTS: "${{ steps.exercice5_la_petite_suite_de_2_a_6_vaut_0.outputs.result }}"
+          EXERCICE5_LA_GRANDE_SUITE_2_A_6_VAUT_20_RESULTS: "${{ steps.exercice5_la_grande_suite_2_a_6_vaut_20.outputs.result }}"
+          EXERCICE5_LA_GRANDE_SUITE_DE_1_A_5_VAUT_0_RESULTS: "${{ steps.exercice5_la_grande_suite_de_1_a_5_vaut_0.outputs.result }}"
+          EXERCICE5_LA_GRANDE_SUITE_AVEC_UN_DE_DOUBLE_VAUT_0_RESULTS: "${{ steps.exercice5_la_grande_suite_avec_un_de_double_vaut_0.outputs.result }}"
+          EXERCICE5_LE_FULL_AVEC_BRELAN_DE_2_ET_PAIRE_DE_6_DONNE_LA_SOMME_DES_5_DES_RESULTS: "${{ steps.exercice5_le_full_avec_brelan_de_2_et_paire_de_6_donne_la_somme_des_5_des.outputs.result }}"
+          EXERCICE5_LE_FULL_AVEC_BRELAN_DE_5_ET_PAIRE_DE_3_DONNE_LA_SOMME_DES_5_DES_RESULTS: "${{ steps.exercice5_le_full_avec_brelan_de_5_et_paire_de_3_donne_la_somme_des_5_des.outputs.result }}"
+          EXERCICE5_LE_FULL_SANS_BRELAN_VAUT_0_RESULTS: "${{ steps.exercice5_le_full_sans_brelan_vaut_0.outputs.result }}"
+          EXERCICE5_LE_FULL_SANS_PAIRE_VAUT_0_RESULTS: "${{ steps.exercice5_le_full_sans_paire_vaut_0.outputs.result }}"
+        with:
+          runners: compilation,exercice1_l_annee_2021_n_est_pas_bissextile,exercice1_l_annee_2023_n_est_pas_bissextile,exercice1_l_annee_2025_n_est_pas_bissextile,exercice1_l_annee_2020_est_bissextile,exercice1_l_annee_2024_est_bissextile,exercice1_l_annee_2028_est_bissextile,exercice1_l_annee_1996_est_bissextile,exercice1_l_annee_1804_est_bissextile,exercice1_l_annee_1900_n_est_pas_bissextile,exercice1_l_annee_1700_n_est_pas_bissextile,exercice1_l_annee_2000_est_bissextile,exercice1_l_annee_1600_est_bissextile,exercice1_l_annee_2100_n_est_pas_bissextile,exercice1_l_annee_2400_est_bissextile,exercice2_le_score_initial_est_0_0,exercice2_apres_un_point_d_alice_le_score_est_15_0,exercice2_apres_deux_points_d_alice_le_score_est_30_0,exercice2_apres_trois_points_d_alice_le_score_est_40_0,exercice2_apres_un_point_de_bob_le_score_est_0_15,exercice2_apres_deux_points_de_bob_le_score_est_0_30,exercice2_apres_trois_points_de_bob_le_score_est_0_40,exercice2_apres_un_point_chacun_le_score_est_15_15,exercice2_apres_deux_points_d_alice_et_un_point_de_bob_le_score_est_30_15,exercice2_apres_trois_points_d_alice_et_un_point_de_bob_le_score_est_40_15,exercice2_apres_trois_points_d_alice_et_deux_points_de_bob_le_score_est_40_30,exercice2_apres_deux_points_chacun_le_score_est_30_30,exercice2_apres_trois_points_chacun_le_score_est_egalite,exercice2_apres_egalite_et_un_point_d_alice_le_score_est_avantage_alice,exercice2_apres_egalite_et_un_point_de_bob_le_score_est_avantage_bob,exercice2_apres_avantage_alice_et_un_point_de_bob_le_score_revient_a_egalite,exercice2_apres_avantage_alice_et_un_point_d_alice_alice_a_gagne,exercice2_apres_quatre_points_d_alice_alice_a_gagne,exercice2_apres_quatre_points_de_bob_bob_a_gagne,exercice2_apres_quatre_points_d_alice_et_un_point_de_bob_alice_a_gagne,exercice2_apres_quatre_points_d_alice_et_deux_points_de_bob_alice_a_gagne,exercice3_la_liste_vide_n_a_aucun_majeur,exercice3_le_gestionnaire_filtre_les_majeurs,exercice3_la_personne_de_18_ans_est_majeure,exercice3_le_gestionnaire_calcule_l_age_moyen_des_majeurs,exercice3_l_age_moyen_sans_majeur_vaut_0,exercice3_le_gestionnaire_trie_alphabetiquement,exercice3_le_gestionnaire_trie_par_age_croissant,exercice4_la_pagination_d_une_seule_page_n_affiche_qu_elle_meme,exercice4_la_pagination_de_5_pages_avec_courant_au_milieu_affiche_toutes_les_pages,exercice4_la_pagination_de_5_pages_avec_courant_au_debut_affiche_toutes_les_pages,exercice4_la_pagination_de_5_pages_avec_courant_a_la_fin_affiche_toutes_les_pages,exercice4_la_pagination_de_7_pages_affiche_toutes_les_pages,exercice4_la_pagination_de_15_pages_avec_courant_au_milieu_affiche_des_ellipses_des_deux_cotes,exercice4_la_pagination_de_15_pages_avec_courant_pres_du_debut_n_affiche_qu_une_ellipse_a_droite,exercice4_la_pagination_de_15_pages_avec_courant_pres_de_la_fin_n_affiche_qu_une_ellipse_a_gauche,exercice4_la_pagination_de_15_pages_avec_courant_en_seconde_position,exercice4_la_pagination_de_15_pages_avec_courant_en_avant_derniere_position,exercice5_la_chance_donne_la_somme_des_des,exercice5_la_chance_avec_cinq_uns_vaut_5,exercice5_la_chance_avec_cinq_six_vaut_30,exercice5_le_yahtzee_avec_cinq_quatre_vaut_50,exercice5_le_yahtzee_avec_cinq_uns_vaut_50,exercice5_le_yahtzee_avec_quatre_uns_et_un_deux_vaut_0,exercice5_le_yahtzee_avec_cinq_des_tous_differents_vaut_0,exercice5_le_decompte_compte_trois_uns,exercice5_le_decompte_compte_deux_six,exercice5_le_decompte_retourne_zero_si_face_absente,exercice5_la_paire_avec_deux_trois_vaut_6,exercice5_la_paire_retourne_la_plus_haute,exercice5_la_paire_avec_quatre_six_vaut_12,exercice5_la_paire_sans_aucune_paire_vaut_0,exercice5_les_deux_paires_donnent_la_somme_des_deux,exercice5_les_deux_paires_prennent_les_deux_plus_hautes,exercice5_les_deux_paires_refusent_une_seule_paire,exercice5_les_deux_paires_refusent_un_brelan_seul,exercice5_le_brelan_avec_trois_des_donne_la_somme,exercice5_le_brelan_avec_cinq_des_identiques_prend_trois,exercice5_le_brelan_sans_aucun_brelan_vaut_0,exercice5_la_petite_suite_1_a_5_vaut_15,exercice5_la_petite_suite_dans_un_ordre_quelconque_vaut_15,exercice5_la_petite_suite_avec_un_de_double_vaut_0,exercice5_la_petite_suite_de_2_a_6_vaut_0,exercice5_la_grande_suite_2_a_6_vaut_20,exercice5_la_grande_suite_de_1_a_5_vaut_0,exercice5_la_grande_suite_avec_un_de_double_vaut_0,exercice5_le_full_avec_brelan_de_2_et_paire_de_6_donne_la_somme_des_5_des,exercice5_le_full_avec_brelan_de_5_et_paire_de_3_donne_la_somme_des_5_des,exercice5_le_full_sans_brelan_vaut_0,exercice5_le_full_sans_paire_vaut_0
+
+      - name: Sauvegarder le cache des rapports Surefire
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: target/surefire-reports
+          key: surefire-${{ github.ref_name }}-${{ github.sha }}
+      #@@@AUTOGRADING-END@@@
