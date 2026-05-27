@@ -1,10 +1,13 @@
 package fr.univ_amu.iut.exercice4;
 
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
 /// Kata 4 - Pagination.
 ///
-/// Kata algorithmique avec beaucoup de cas limites. Idéal pour pratiquer la **discipline TDD** :
-/// on active les tests dans l'ordre (du plus simple au plus complexe) et on résiste à la tentation
-/// d'anticiper.
+/// Kata algorithmique avec beaucoup de cas limites. Idéal pour pratiquer la
+/// **discipline TDD** : on active les tests dans l'ordre (du plus simple au plus
+/// complexe) et on résiste à la tentation d'anticiper.
 public class Pagination {
 
   private final int courant;
@@ -17,14 +20,31 @@ public class Pagination {
 
   /// Retourne la représentation textuelle de la barre de pagination.
   ///
-  /// Format : pages séparées par des espaces, page courante entre parenthèses, `...` pour combler
-  /// les trous quand il y a plus de 7 pages au total.
+  /// Format : pages séparées par des espaces, page courante entre parenthèses,
+  /// `...` pour combler les trous quand il y a plus de 7 pages au total.
+  ///
   public String afficher() {
-    StringBuilder sortie = new StringBuilder();
-    // TODO kata 4 : construire la chaîne de pagination selon les règles
-    // du README. Activez les tests dans l'ordre, ils vous guident :
-    //   - d'abord le cas "total <= 7" (affichage complet)
-    //   - puis le cas "beaucoup de pages" avec gestion des ellipses
-    return sortie.toString();
+    int[] pages = pagesAAfficher();
+    return IntStream.range(0, pages.length)
+        .mapToObj(
+            i -> (i == 0 ? "" : separateurEntre(pages[i - 1], pages[i])) + formatPage(pages[i]))
+        .collect(Collectors.joining());
+  }
+
+  private int[] pagesAAfficher() {
+    if (total <= 7) return IntStream.rangeClosed(1, total).toArray();
+    return IntStream.of(1, courant - 1, courant, courant + 1, total)
+        .filter(p -> p >= 1 && p <= total)
+        .sorted()
+        .distinct()
+        .toArray();
+  }
+
+  private String separateurEntre(int precedent, int actuel) {
+    return (actuel - precedent > 1) ? " ... " : " ";
+  }
+
+  private String formatPage(int page) {
+    return page == courant ? "(" + page + ")" : String.valueOf(page);
   }
 }
